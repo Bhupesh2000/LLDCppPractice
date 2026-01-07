@@ -6,7 +6,7 @@ Functional Requirements -
     Each request is identified by a clientId (e.g., int or std::string)
     Rate limits apply independently per client
 2. Rate limit policy (fixed window)
-    Allow at most N requests per T seconds per client
+    Allow at most N requests per T seconds per client <-- *Suggests global limit
     Fixed Window algorithm
     Lazy window reset (no background thread)
 3. API
@@ -40,3 +40,22 @@ Concurrency Requirements
     Immutable after construction
     No locking required for access
 
+
+Notes - 
+1. struct vs class - 
+It is about:
+    Encapsulation
+    Invariants
+    Who is allowed to mutate state
+ClientState is a simple data holder
+    No complex behavior
+    No public API for external users
+    Used only internally by RateLimiter
+Passing around references
+    No ownership transfer
+    No polymorphism
+    No lifetime complexity
+These points support using a struct for ClientState.
+Struct vs class = semantic intent
+“I’d use a struct for ClientState since it’s an internal passive data holder with no independent behavior.
+All invariants are enforced by RateLimiter, so a struct keeps the design simple and explicit.”
