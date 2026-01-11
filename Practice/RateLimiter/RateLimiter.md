@@ -39,6 +39,16 @@ Concurrency Requirements
     Stored in RateLimiter
     Immutable after construction
     No locking required for access
+5. ClientState client;
+   clientsStateMap[clientId] = client;
+   This code does not compile because ClientState contains a std::mutex, and std::mutex is non-copyable. The assignment into std::unordered_map requires the value type to be copyable or movable, which fails here.
+   clientsStateMap.try_emplace(clientId); // use this(try_emplace default-constructs ClientState directly inside the map)
+6. Subtract time_points → get a duration.
+   Compare durations directly — no cast needed.
+   windowSize is of std::chrono::seconds, 
+   auto now = std::chrono::steady_clock::now(); 
+   auto elapsed = now - clientState->windowStartTime; // correct
+
 
 
 Notes - 
