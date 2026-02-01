@@ -2,6 +2,7 @@
 
 #include<iostream>
 #include<vector>
+#include <memory>
 
 //Bad Way
 enum class ShapeType { Circle, Rectangle };
