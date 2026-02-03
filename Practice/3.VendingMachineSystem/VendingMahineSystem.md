@@ -97,3 +97,63 @@ No shared mutable state
 
 -------------------------------------------------------------------------------------------------------------------------------
 
+Class List -
+VendingMachine
+Product
+Transaction
+InventoryManager
+CashManager
+Payment (interface / stateless logic)
+enum class Coin, enum class Note
+
+-------------------------------------------------------------------------------------------------------------------------------
+
+Notes - 
+1. When some other component (e.g. VendingMachine, Transaction) needs product information, should InventoryManager:
+    A) Return a Product (or reference to it)
+    B) Or keep Product completely internal and only expose derived data (price, availability, etc.)?
+If InventoryManager exposes Product directly:
+Other components start depending on inventory’s internal structure
+Harder to refactor later
+Inventory leaks domain knowledge
+If it does not expose Product:
+Inventory becomes a strict boundary
+Cleaner responsibilities
+Slightly more boilerplate, but safer design
+
+InventoryManager should expose read-only access to Product metadata, either by returning a const Product& or a copy, but never allow mutation. Inventory remains the owner of stock state, not product identity.
+
+2. If your map stores owning pointers (raw pointers or smart pointers), the correct approach to clear memory depends on the pointer type.
+Case 1: std::map<int, Struct*> (raw pointer — manual memory management)
+auto it = mp.find(key);
+if (it != mp.end()) {
+    delete it->second;   // free heap memory
+    mp.erase(it);        // remove map entry
+}
+Case 2: std::map<int, std::unique_ptr<Struct>>
+mp.erase(key);
+erase() destroys the unique_ptr
+unique_ptr destructor automatically deletes the object
+Case 3: std::map<int, std::shared_ptr<Struct>>
+mp.erase(key);
+Memory is freed automatically when reference count becomes zero.
+
+3. State owned by CashManager
+    You should be thinking in terms of machine reserve only:
+    Counts of coins per denomination
+    Counts of notes per denomination
+    No transaction-scoped money
+    No totals without denomination breakdown
+This is long-lived, shared, mutable state.
+
+Operations CashManager must support
+At minimum, it must support both directions of money flow:
+1. Accept money into reserve
+    After a successful transaction
+2. Check if exact change is possible
+    Before committing a transaction
+3. Dispense change
+    Atomically reduce denomination counts
+4. Admin operations
+    Collect money
+    Refill denominations
