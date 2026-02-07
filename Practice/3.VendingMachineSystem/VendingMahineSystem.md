@@ -157,3 +157,6 @@ At minimum, it must support both directions of money flow:
 4. Admin operations
     Collect money
     Refill denominations
+
+4. I initially thought Payment should only check feasibility (inventory availability and change possibility) and return a boolean, with VendingMachine later reducing inventory and dispensing change based on that result. However, this design is unsafe in a concurrent system. Between the “check” and the “commit”, shared state (inventory or cash reserves) may change due to other transactions, leading to race conditions, partial failures, and broken invariants. Therefore, the correct design is that the same component that validates shared mutable state must also commit it atomically. Payment must both validate and commit inventory consumption and change dispensing (via InventoryManager and CashManager), while not mutating the Transaction state. VendingMachine remains the orchestrator: it computes derived values (like total price), calls Payment::pay(), and updates the transaction status based on success or failure. This cleanly separates orchestration from policy and ensures correctness under concurrency.
+

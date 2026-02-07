@@ -4,7 +4,7 @@
 #include <string>
 #include <map>
 #include <unordered_map>
-#include <unordered_set>
+#include <vector>
 #include <algorithm>
 #include <mutex>
 #include <optional>
@@ -89,6 +89,8 @@ public:
         return &it -> second ->product;
     }
 
+    
+
     int getAvailableQty(int productId) const{
         std::lock_guard<std::mutex> guard(inventoryLock);
         auto it = inventory.find(productId);
@@ -116,6 +118,30 @@ public:
         return true;
     }
 
+    bool tryConsumeTransaction(const std::unordered_map<int, int>& productIdWithQty){
+        std::lock_guard<std::mutex> guard(inventoryLock);
+
+        // Phase 1: validation (no mutation)
+        for (const auto& [productId, qty] : productIdWithQty) {
+            auto it = inventory.find(productId);
+            if (it == inventory.end()) {
+                return false;
+            }
+
+            Stock* stock = it->second.get();
+            if (stock->availableQty < qty) {
+                return false;
+            }
+        }
+
+        // Phase 2: commit (all-or-nothing)
+        for (const auto& [productId, qty] : productIdWithQty) {
+            inventory[productId]->availableQty -= qty;
+        }
+
+        return true;
+    }
+
     void restock(int productId, int qty){
         if(qty <= 0) return;
         std::lock_guard<std::mutex> guard(inventoryLock);
@@ -128,6 +154,7 @@ public:
         
         s -> availableQty += qty;
     }
+
 };
 
 enum class Denomination{
@@ -268,9 +295,163 @@ public:
     }
 };
 
+struct PaymentResult{
+    bool success;
+    std::unordered_map<Denomination, int> change;
+};
+class Payment{
+protected:
+    InventoryManager& invMgr;
+    CashManager& cashMgr;
+
+public:
+    Payment(InventoryManager& inv, CashManager& cash) : invMgr(inv), cashMgr(cash){}
+
+    virtual PaymentResult pay(Transaction& transct) = 0;
+
+    virtual ~Payment() = default;
+};
+
+class CashPayment : public Payment{
+public:
+    CashPayment(InventoryManager& inv, CashManager& cash) : Payment(inv, cash){}
+
+    PaymentResult CashPayment::pay(Transaction& transct) {
+        PaymentResult result{false, {}};
+
+        const auto& productIdWithQty = transct.getAllProductsWithQty();
+        const auto& denomList = transct.getAllDenomsWithQty();
+
+        if (productIdWithQty.empty()) return result;
+
+        // 1. Compute total price
+        int totalPrice = 0;
+        for (const auto& [productId, qty] : productIdWithQty) {
+            const Product* product = invMgr.getProduct(productId);
+            if (!product) return result;
+            totalPrice += product->getPrice() * qty;
+        }
+
+        // 2. Compute total inserted cash
+        int totalInserted = 0;
+        for (const auto& [denom, qty] : denomList) {
+            totalInserted += static_cast<int>(denom) * qty;
+        }
+
+        if (totalInserted < totalPrice) return result;
+        int changeAmount = totalInserted - totalPrice;
+
+        // 3. Consume inventory FIRST (rollback possible)
+        if (!invMgr.tryConsumeTransaction(productIdWithQty)) {
+            return result;
+        }
+
+        // 4. Add inserted cash to machine
+        for (const auto& [denom, qty] : denomList) {
+            cashMgr.addCash(denom, qty);
+        }
+
+        // 5. Dispense change
+        std::optional<std::unordered_map<Denomination, int>> denomChange;
+        if (changeAmount > 0) {
+            denomChange = cashMgr.dispenseChange(changeAmount);
+            if (!denomChange) {
+                // rollback inventory (cash rollback not needed)
+                for (const auto& [productId, qty] : productIdWithQty) {
+                    invMgr.restock(productId, qty);
+                }
+                return result;
+            }
+        }
+
+        // success
+        result.success = true;
+        if (denomChange) result.change = *denomChange;
+        return result;
+    }
+};
+
+class VendingMachine {
+private:
+    InventoryManager inventoryMgr;
+    CashManager cashMgr;
+    std::unique_ptr<Payment> paymentStrategy;
+
+public:
+    VendingMachine() {
+        paymentStrategy = std::make_unique<CashPayment>(inventoryMgr, cashMgr);
+    }
+
+    // -------- User Flow --------
+
+    Transaction createTransaction() {
+        return Transaction{};
+    }
+
+    PaymentResult processPayment(Transaction& txn) {
+        if (txn.getCurrentStatus() != TransactionStatus::CREATED) {
+            return {false, {}};
+        }
+
+        PaymentResult result = paymentStrategy->pay(txn);
+
+        if (result.success) {
+            txn.markConfirmed();
+            txn.markCompleted();
+        } else {
+            txn.markFailed();
+        }
+
+        return result;
+    }
+
+    // -------- Inventory APIs --------
+
+    bool addProduct(const Product& product, int qty) {
+        return inventoryMgr.addProduct(product, qty);
+    }
+
+    bool removeProduct(int productId) {
+        return inventoryMgr.removeProduct(productId);
+    }
+
+    int getAvailableQty(int productId) const {
+        return inventoryMgr.getAvailableQty(productId);
+    }
+
+    // -------- Cash/Admin APIs --------
+
+    void addInitialCash(Denomination denom, int qty) {
+        cashMgr.addCash(denom, qty);
+    }
+
+    void collectAllCash() {
+        cashMgr.collectAll();
+    }
+};
+
+
 int main() {
 
-    
+    VendingMachine vm;
+
+    // admin setup
+    vm.addProduct(Product(1, "Coke", 30), 10);
+    vm.addInitialCash(Denomination::FIVE, 10);
+
+    // user flow
+    Transaction txn = vm.createTransaction();
+    txn.addProduct(1, 1);
+    txn.insertCash(Denomination::TWENTY, 1);
+    txn.insertCash(Denomination::TEN, 1);
+
+    PaymentResult result = vm.processPayment(txn);
+
+    if (result.success) {
+        // dispense product
+        // dispense result.change
+    }
+
 
     return 0;
 }
