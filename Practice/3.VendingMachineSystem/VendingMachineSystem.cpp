@@ -4,6 +4,7 @@
 #include <string>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 #include <mutex>
 #include <optional>
@@ -200,6 +201,70 @@ public:
         for(auto& [denom, cnt] : reserves){
             reserves[denom] = 0;
         }
+    }
+};
+
+enum class TransactionStatus{
+    CREATED, CONFIRMED, FAILED, COMPLETED
+};
+
+class Transaction{
+    TransactionStatus status = TransactionStatus::CREATED;
+    // std::unordered_map<Product, int> productList; <- Product will be a very heavy has key. Better to keep productId
+    std::unordered_map<int, int> productIdToQty;
+    std::unordered_map<Denomination, int> denomList;
+    
+public:
+    Transaction() = default;
+
+    TransactionStatus getCurrentStatus() const{
+        return status;
+    }
+
+    const std::unordered_map<int, int>& getAllProductsWithQty() const{
+        return productIdToQty;
+    }
+
+    const std::unordered_map<Denomination, int>& getAllDenomsWithQty() const{
+        return denomList;
+    }
+
+    void addProduct(int productId, int qty){ // along with qty check also check the status(only allowed in created state)
+        if(this -> status == TransactionStatus::CREATED && qty > 0){
+            if(productIdToQty.find(productId) != productIdToQty.end()) productIdToQty[productId] += qty;
+            else productIdToQty.emplace(productId, qty);
+        }
+    }
+
+    void insertCash(Denomination denom, int qty){ // along with qty check also check the status(only allowed in created state)
+        if(this -> status == TransactionStatus::CREATED && qty > 0){
+            if(denomList.find(denom) != denomList.end()) denomList[denom] += qty;
+            else denomList.emplace(denom, qty);
+        }
+    }
+
+    bool markConfirmed(){ // CREATED -> CONFIRMED
+        if(this -> status == TransactionStatus::CREATED){
+            this -> status = TransactionStatus::CONFIRMED;
+            return true;
+        }
+        return false;
+    }
+
+    bool markFailed(){ // CREATED / CONFIRMED -> FAILED (failure can happen at any time)
+        if(this -> status == TransactionStatus::CREATED || this -> status == TransactionStatus::CONFIRMED){
+            this -> status = TransactionStatus::FAILED;
+            return true;
+        }
+        return false;
+    }
+
+    bool markCompleted(){ // CONFIRMED -> COMPLETED
+        if(this -> status == TransactionStatus::CONFIRMED){
+            this -> status = TransactionStatus::COMPLETED;
+            return true;
+        }
+        return false;
     }
 };
 
